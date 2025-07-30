@@ -21,7 +21,7 @@ from google.cloud import vision
 from google.oauth2 import service_account
 
 # Дозволений chat_id вашої групи/чату
-ALLOWED_CHAT_ID = -4729811445  # <-- замініть на свій
+ALLOWED_CHAT_ID = -4729811445  # <-- замініть на свій ID
 
 # 🛠 Запуск фейкового HTTP-сервера (Render використовує порт із $PORT)
 def keep_port_open():
@@ -71,7 +71,8 @@ def parse_expense(text: str) -> dict:
         f"\"{text}\"\n"
         "Відповідай JSON-об'єктом з полями category, amount, description."
     )
-    resp = openai.ChatCompletion.create(
+    # Використовуємо новий інтерфейс openai>=1.0.0
+    resp = openai.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role":"user","content":prompt}],
         temperature=0
@@ -119,7 +120,8 @@ async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"У мене є дані витрат у форматі JSON:\n{records_json}\n"
             f"Запит: {q}\nОтвіт українською, коротко:"
         )
-        resp = openai.ChatCompletion.create(
+        # Новий інтерфейс OpenAI
+        resp = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role":"user","content":prompt}],
             temperature=0
