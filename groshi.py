@@ -59,7 +59,7 @@ def ocr_extract_text(path: str) -> str:
 # GPT-парсинг витрати
 def parse_expense(text: str) -> dict:
     prompt = (
-        f"Видобери з цього тексту категорію, суму (цілим числом) та короткий опис:\n"  
+        f"Видобери з цього тексту категорію, суму (цілим числом) та короткий опис:\n"
         f"\"{text}\"\n"
         "Відповідай JSON-об'єктом з полями category, amount, description."
     )
@@ -70,40 +70,40 @@ def parse_expense(text: str) -> dict:
     )
     return json.loads(resp.choices[0].message.content)
 
-# Команда /id
+# /id
 async def send_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
-    await update.message.reply_text(f"Chat ID = {chat_id}")
+    await update.message.reply_text(f"Chat ID = {update.effective_chat.id}")
 
-# Команда /help
+# /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
     help_text = (
         "🔹 Доступні команди:\n"
         "/id — показати chat_id чату\n"
         "/help — цей довідник\n"
         "/query <запит> — запит до таблиці витрат\n"
-        "Просто надішліть повідомлення або фото чеку — бот автоматично розпізнає та збереже витрату."
+        "Просто надішліть повідомлення або фото чеку — бот автоматично розпізнає витрату."
     )
     await update.message.reply_text(help_text)
 
-# Команда /query
+# /query
 async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
     q = " ".join(context.args)
     if not q:
-        await update.message.reply_text("⚠️ Використання: /query <запит>, наприклад: /query скільки я витратив на їжу цього місяця?")
+        await update.message.reply_text(
+            "⚠️ Використання: /query <запит>\n"
+            "Наприклад: /query скільки я витратив на їжу цього місяця?"
+        )
         return
     records = sheet.get_all_records()
     prompt = (
         f"У мене є дані витрат у форматі JSON: {records}\n"
-        f"Запит: {q}\nВідповідь українською:"  
+        f"Запит: {q}\nВідповідь українською:"
     )
     resp = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
@@ -112,12 +112,10 @@ async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(resp.choices[0].message.content)
 
-# Обробка повідомлень витрат
+# обробка витрат
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id != ALLOWED_CHAT_ID:
+    if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
-    # Фото має пріоритет для OCR
     if update.message.photo:
         file = await context.bot.get_file(update.message.photo[-1].file_id)
         path = "/tmp/receipt.jpg"
@@ -131,19 +129,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount = exp['amount']
         desc = exp.get('description', '')
     except Exception:
-        await update.message.reply_text("⚠️ Не вдалося розпізнати витрату. Спробуйте інший формат або фото.")
+        await update.message.reply_text(
+            "⚠️ Не вдалося розпізнати витрату. Спробуйте інший формат або фото."
+        )
         return
     date = datetime.now().strftime("%Y-%m-%d")
     user = update.message.from_user.first_name
     sheet.append_row([date, user, cat, amount, desc])
     await update.message.reply_text(f"✅ Додано: {cat} — {amount} грн — {desc}")
 
-# Запуск бота
+# запуск бота
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
+    # скидаємо webhook і чергу оновлень перед polling
+    app.bot.delete_webhook(drop_pending_updates=True)
     app.add_handler(CommandHandler("id", send_id))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("query", query_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     print("Бот запущено!")
-    app.run_polling()
+    # запускаємо polling і відкидаємо старі апдейти
+    app.run_polling(drop_pending_updates=True)
