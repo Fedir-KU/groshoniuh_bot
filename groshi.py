@@ -11,8 +11,10 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 # 🛠 Фейковий HTTP-сервер для Render
+# Використовуємо порт із змінної середовища PORT, щоб Render міг проксувати його
+
 def keep_port_open():
-    PORT = 10000  # Можна залишити будь-який відкритий порт
+    PORT = int(os.environ.get("PORT", "10000"))
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print(f"Serving fake HTTP on port {PORT}")
