@@ -13,17 +13,16 @@ import openai
 from google.cloud import vision
 from google.oauth2 import service_account
 
-# Вкажіть тут ваш chat_id
-ALLOWED_CHAT_ID = -1001234567890  # <-- замініть на свій
+# Дозволений chat_id вашої групи/чату
+ALLOWED_CHAT_ID = -4729811445  # <-- замініть на свій ID
 
-# Фейковий HTTP‑сервер для Render (слухає порт із $PORT)
+# Фейковий HTTP‑сервер для Render (слухає порт з $PORT)
 def keep_port_open():
     PORT = int(os.environ.get("PORT", "10000"))
     Handler = http.server.SimpleHTTPRequestHandler
     with socketserver.TCPServer(("", PORT), Handler) as httpd:
         print(f"Serving fake HTTP on port {PORT}")
         httpd.serve_forever()
-
 threading.Thread(target=keep_port_open, daemon=True).start()
 
 # Змінні оточення
@@ -35,9 +34,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Ініціалізація OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# Авторизація Google Sheets & Vision
+# Авторизація Google Sheets та Vision API
 creds_dict = json.loads(GOOGLE_CREDS_JSON)
-sheets_scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+sheets_scope = [
+    "https://spreadsheets.google.com/feeds",
+    "https://www.googleapis.com/auth/drive"
+]
 sheets_creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, sheets_scope)
 gspread_client = gspread.authorize(sheets_creds)
 sheet = gspread_client.open_by_key(SHEET_ID).sheet1
@@ -45,18 +47,19 @@ sheet = gspread_client.open_by_key(SHEET_ID).sheet1
 vision_creds = service_account.Credentials.from_service_account_info(creds_dict)
 vision_client = vision.ImageAnnotatorClient(credentials=vision_creds)
 
-# OCR-функція
+# OCR: витяг тексту з фото
 def ocr_extract_text(path: str) -> str:
     with open(path, 'rb') as f:
         img = f.read()
     image = vision.Image(content=img)
     result = vision_client.text_detection(image=image)
-    return result.text_annotations[0].description if result.text_annotations else ""
+    annotations = result.text_annotations
+    return annotations[0].description if annotations else ''
 
-# Парсинг через GPT
+# GPT-парсинг витрати
 def parse_expense(text: str) -> dict:
     prompt = (
-        f"Видобери з цього тексту категорію, суму (цілим числом) та короткий опис:\n"
+        f"Видобери з цього тексту категорію, суму (цілим числом) та короткий опис:\n"  
         f"\"{text}\"\n"
         "Відповідай JSON-об'єктом з полями category, amount, description."
     )
@@ -67,17 +70,41 @@ def parse_expense(text: str) -> dict:
     )
     return json.loads(resp.choices[0].message.content)
 
-# /id
+# Команда /id
 async def send_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Chat ID = {update.effective_chat.id}")
+    chat_id = update.effective_chat.id
+    if chat_id != ALLOWED_CHAT_ID:
+        return
+    await update.message.reply_text(f"Chat ID = {chat_id}")
 
-# /query
+# Команда /help
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id != ALLOWED_CHAT_ID:
+        return
+    help_text = (
+        "🔹 Доступні команди:\n"
+        "/id — показати chat_id чату\n"
+        "/help — цей довідник\n"
+        "/query <запит> — запит до таблиці витрат\n"
+        "Просто надішліть повідомлення або фото чеку — бот автоматично розпізнає та збереже витрату."
+    )
+    await update.message.reply_text(help_text)
+
+# Команда /query
 async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
+    chat_id = update.effective_chat.id
+    if chat_id != ALLOWED_CHAT_ID:
         return
     q = " ".join(context.args)
+    if not q:
+        await update.message.reply_text("⚠️ Використання: /query <запит>, наприклад: /query скільки я витратив на їжу цього місяця?")
+        return
     records = sheet.get_all_records()
-    prompt = f"Records: {records}\nЗапит: {q}\nВідповідь українською:"
+    prompt = (
+        f"У мене є дані витрат у форматі JSON: {records}\n"
+        f"Запит: {q}\nВідповідь українською:"  
+    )
     resp = openai.ChatCompletion.create(
         model="gpt-3.5-turbo",
         messages=[{"role":"user","content":prompt}],
@@ -85,36 +112,37 @@ async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(resp.choices[0].message.content)
 
-# обробка витрат
+# Обробка повідомлень витрат
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ALLOWED_CHAT_ID:
+    chat_id = update.effective_chat.id
+    if chat_id != ALLOWED_CHAT_ID:
         return
-
-    # якщо є фото
+    # Фото має пріоритет для OCR
     if update.message.photo:
         file = await context.bot.get_file(update.message.photo[-1].file_id)
         path = "/tmp/receipt.jpg"
         await file.download_to_drive(path)
         text = ocr_extract_text(path)
     else:
-        text = update.message.text
-
+        text = update.message.text or ''
     try:
         exp = parse_expense(text)
-        cat, amount, desc = exp["category"], exp["amount"], exp.get("description","")
+        cat = exp['category']
+        amount = exp['amount']
+        desc = exp.get('description', '')
     except Exception:
-        await update.message.reply_text("⚠️ Не вдалося розпізнати витрату.")
+        await update.message.reply_text("⚠️ Не вдалося розпізнати витрату. Спробуйте інший формат або фото.")
         return
-
     date = datetime.now().strftime("%Y-%m-%d")
     user = update.message.from_user.first_name
     sheet.append_row([date, user, cat, amount, desc])
     await update.message.reply_text(f"✅ Додано: {cat} — {amount} грн — {desc}")
 
-# старт бота
-if __name__ == "__main__":
+# Запуск бота
+if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("id", send_id))
+    app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("query", query_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     print("Бот запущено!")
