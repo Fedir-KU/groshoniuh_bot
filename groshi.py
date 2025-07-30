@@ -6,22 +6,14 @@ import http.server
 import socketserver
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-from telegram.ext import CommandHandler
+# Вкажіть тут ваш chat_id (отриманий через команду /id)
+ALLOWED_CHAT_ID = -1001234567890  # Заміни на свій chat_id
 
-async def send_id(update, context):
-    await update.message.reply_text(f"Chat ID = {update.effective_chat.id}")
-
-# у __main__ перед run_polling():
-app.add_handler(CommandHandler("id", send_id))
-
-
-# 🛠 Фейковий HTTP-сервер для Render
-# Використовуємо порт із змінної середовища PORT, щоб Render міг проксувати його
-
+# 🛠 Фейковий HTTP-сервер для Render (слухає порт із $PORT)
 def keep_port_open():
     PORT = int(os.environ.get("PORT", "10000"))
     Handler = http.server.SimpleHTTPRequestHandler
@@ -43,8 +35,18 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(SHEET_ID).sheet1
 
+# Команда /id
+def send_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Відправляє chat_id поточного чату"""
+    update.message.reply_text(f"Chat ID = {update.effective_chat.id}")
+
 # 📩 Обробка повідомлень
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    # Ігноруємо повідомлення з інших чатів
+    if chat_id != ALLOWED_CHAT_ID:
+        return
+
     message = update.message.text
     user = update.message.from_user.first_name
     date = datetime.now().strftime("%Y-%m-%d")
@@ -55,13 +57,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         summ = match.group("sum")
         desc = match.group("desc").strip()
         sheet.append_row([date, user, cat, summ, desc])
-        await update.message.reply_text(f"✅ Додано: {cat} — {summ} грн — {desc}")
+        update.message.reply_text(f"✅ Додано: {cat} — {summ} грн — {desc}")
     else:
-        await update.message.reply_text("⚠️ Формат: 'категорія сума опис'. Наприклад: їжа 200 піца")
+        update.message.reply_text("⚠️ Формат: 'категорія сума опис'. Наприклад: їжа 200 піца")
 
 # ▶️ Запуск бота
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
+    # Регіструємо команду /id
+    app.add_handler(CommandHandler("id", send_id))
+    # Регіструємо обробник повідомлень витрат
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     print("Бот запущено!")
     app.run_polling()
