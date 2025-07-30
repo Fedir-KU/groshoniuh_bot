@@ -10,6 +10,15 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+from telegram.ext import CommandHandler
+
+async def send_id(update, context):
+    await update.message.reply_text(f"Chat ID = {update.effective_chat.id}")
+
+# у __main__ перед run_polling():
+app.add_handler(CommandHandler("id", send_id))
+
+
 # 🛠 Фейковий HTTP-сервер для Render
 # Використовуємо порт із змінної середовища PORT, щоб Render міг проксувати його
 
