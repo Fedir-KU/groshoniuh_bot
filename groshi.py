@@ -1,11 +1,24 @@
 import os
 import re
+import json
+import threading
+import http.server
+import socketserver
+from datetime import datetime
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
-from datetime import datetime
-import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+# 🛠 Фейковий HTTP-сервер для Render
+def keep_port_open():
+    PORT = 10000  # Можна залишити будь-який відкритий порт
+    Handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), Handler) as httpd:
+        print(f"Serving fake HTTP on port {PORT}")
+        httpd.serve_forever()
+
+threading.Thread(target=keep_port_open, daemon=True).start()
 
 # 📥 Змінні оточення
 TOKEN = os.getenv("TELEGRAM_TOKEN")
