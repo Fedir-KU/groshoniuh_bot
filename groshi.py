@@ -6,7 +6,14 @@ import http.server
 import socketserver
 from datetime import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    CallbackContext
+)
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import openai
@@ -31,8 +38,9 @@ SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 GOOGLE_CREDS_JSON = os.getenv("GOOGLE_CREDS_JSON")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Ініціалізація OpenAI
+# Ініціалізація OpenAI та дебаг ключа
 openai.api_key = OPENAI_API_KEY
+print("OPENAI_API_KEY:", OPENAI_API_KEY)
 
 # Авторизація Google Sheets та Vision API
 creds_dict = json.loads(GOOGLE_CREDS_JSON)
@@ -93,6 +101,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ALLOWED_CHAT_ID:
         return
+    print(">>> query_handler called with args:", context.args)
+    await update.message.reply_text(f"Отримав args: {context.args}")
     q = " ".join(context.args)
     if not q:
         await update.message.reply_text(
@@ -128,25 +138,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cat = exp['category']
         amount = exp['amount']
         desc = exp.get('description', '')
-    except Exception:
+    except Exception as e:
         await update.message.reply_text(
             "⚠️ Не вдалося розпізнати витрату. Спробуйте інший формат або фото."
         )
+        print("Error in parse_expense:", e)
         return
     date = datetime.now().strftime("%Y-%m-%d")
     user = update.message.from_user.first_name
     sheet.append_row([date, user, cat, amount, desc])
     await update.message.reply_text(f"✅ Додано: {cat} — {amount} грн — {desc}")
 
+# Глобальний error handler
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    print("❗️ Exception in handler:", context.error)
+    if hasattr(update, 'effective_message') and update.effective_message:
+        await update.effective_message.reply_text("⚠️ Сталася помилка. Подивіться логи.")
+
 # запуск бота
 if __name__ == '__main__':
     app = ApplicationBuilder().token(TOKEN).build()
     # скидаємо webhook і чергу оновлень перед polling
     app.bot.delete_webhook(drop_pending_updates=True)
+    # реєстрація хендлерів
     app.add_handler(CommandHandler("id", send_id))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("query", query_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    # реєстрація error handler
+    app.add_error_handler(error_handler)
     print("Бот запущено!")
     # запускаємо polling і відкидаємо старі апдейти
     app.run_polling(drop_pending_updates=True)
